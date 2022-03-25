@@ -46,7 +46,7 @@ To implement linear in means regressions, I wrote the `peer_iv` function. This f
 The matrix generates an standard Stata regression output, containing coefficients, standard errors, p-values and all the relevant information, and it stores eclass results. This means that the output could be stored with custom commands like `outreg2`, `estout` or `esttab` that allow the user to build customizable output tables.
 
 
-```python
+```stata
 %%stata
 
 capture program drop peer_iv
@@ -486,5 +486,5 @@ th_lee_2
     [3,] 0.15009431
     
 
-As we can see, in both cases, the `peer_iv` command produces the same estimates as the original package. Furthermore, both packages produce estimates that are very similar to the ones used to generate our data (for instance, we have that $\beta=0.4666$, and in both cases we get coefficients very close to that).
+As we can see, in both cases, the `peer_iv` command produces the same estimates as the original package. Furthermore, both packages produce estimates that are very similar to the ones used to generate our data (for instance, we have that beta=0.4666, and in both cases we get coefficients very close to that).
 
