@@ -187,7 +187,7 @@ end
 Here we will run a little example to see how the command works, and how you can generate an adjacency matrix in Stata. We are going to use the `auto` dataset with 1978 automobile data, and we are going to create a random adjacency matrix `G` with elements that are drawn from a uniform between 0 an 1, but we will force the elements in the main diagonal to be 0. We are also going to row normalize the adjacency matrix.
 
 
-```python
+```stata
 %%stata
 
 sysuse auto, clear
