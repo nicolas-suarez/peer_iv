@@ -41,143 +41,158 @@ stata_setup.config("C:/Program Files/Stata17", "mp")
 
 # Peer IV function
 
-To implement linear in means regressions, I wrote the `peer_iv` function. This function takes as inputs, as any other regression function, a dependent variable and independent variables, plus an adjacency matrix `G` to perform the calculations. This matrix has to be a `Mata` matrix object (`Stata` matrices have size limitations). The option `row` allows us to row-normalize the adjacency matrix (so the sum of each row is 1, and we can interpret the product of a variable and the matrix as weighted means), and the `fixed` option adds group level fixed effects.
+To implement linear in means regressions, I wrote the `peer_iv` function. This function takes as inputs, as any other regression function, a dependent variable and independent variables, plus an adjacency matrix `G` to perform the calculations. This matrix has to be a `Mata` matrix object (`Stata` matrices have size limitations), and it is the only parameter that the user is forced to set. All the other parameters are optiontal: `row` allows us to row-normalize the adjacency matrix (so the sum of each row is 1, and we can interpret the product of a variable and the matrix as weighted means), the `fixed` option adds group level fixed effects, the `ols` option runs a regular OLS regression but with peer effects, so by using this we avoid creating new variables with average outcomes and regressors for the peers of each observation, and the `vardir` option allow us to pass variables directly to the regression with the `ols` option, so they won't have a peer effect (this can be used for instance to add dummies for fixed effects).
 
 The matrix generates an standard Stata regression output, containing coefficients, standard errors, p-values and all the relevant information, and it stores eclass results. This means that the output could be stored with custom commands like `outreg2`, `estout` or `esttab` that allow the user to build customizable output tables.
-
 
 ```stata
 %%stata
 
 capture program drop peer_iv
 program define peer_iv, eclass
-version 17
-syntax varlist, ADJacency(name) [ROW FIXED OLS] 
-/* implements the generalized 2SLS model of Bramoulle et al (2009), without fixed effects.
-The model includes a constant, then the endogenous effect, effects of the independent variables, and then the exogenous effects.
-For more details see https://rpubs.com/Nicolas_Gallo/549370
+    version 17
+    syntax varlist, ADJacency(name) [ROW FIXED OLS VARdir(varlist)] 
+    /* implements the generalized 2SLS model of Bramoulle et al (2009), without fixed effects.
+    The model includes a constant, then the endogenous effect, effects of the independent variables, and then the exogenous effects.
+    For more details see https://rpubs.com/Nicolas_Gallo/549370
 
-INPUTS:
-varlist = exogenous variables
-dep= dependent variable
-adjacency=name of the adjacency matrix in Mata
-row=optional, row normalizes the adjacency matrix
-fixed=optional, estimates model with cohort level fixed effects
-ols=optional, OLS results. Don't use together with FIXED
+    INPUTS:
+    varlist = exogenous variables
+    dep= dependent variable
+    adjacency=name of the adjacency matrix in Mata
+    row=optional, row normalizes the adjacency matrix
+    fixed=optional, estimates model with cohort level fixed effects
+    ols=optional, OLS results. Don't use together with FIXED
+    vardir=optional. Variables to use in the regression that won't have peer effects, only to be used with OLS.
 
-OUTPUT:
-displays the coefficients and standard errors in a table. Stores eclass results.
-*/
+    OUTPUT:
+    displays the coefficients and standard errors in a table. Stores eclass results.
+    */
+    *separating dependent from independent variables
+    gettoken dep varlist: varlist
+    preserve
+    quietly{
 
-*separating dependent from independent variables
-gettoken dep varlist: varlist
-preserve
-quietly{
-*checking if there are missing values in our data
-reg `dep' `varlist'
-*recovering the indexes of non-missing observations
-gen muestra=e(sample)
-ereturn clear 
+    *returning error if OLS and FIXED are used together
+    if "`ols'"!="" & "`fixed'"!="" { 
+    noisily display as error "options OLS and FIXED may not be combined"
+    exit 184
+    }
 
-*moving data as matrices
-mata X=st_data(.,"`varlist'")
-mata y=st_data(.,"`dep'")
-mata muestra=st_data(.,"muestra")
+    *returning error if VARDIR and OLS are not used together
+    if "`ols'"==""  & "`vardir'"!="" { 
+    noisily display as error "option VARDIR has to be used with OLS option"
+    exit 184
+    }
 
-*dropping missing values from data matrices
-mata X=select(X,muestra)
-mata y=select(y,muestra)
+    *checking if there are missing values in our data
+    reg `dep' `varlist' `vardir'
+    *recovering the indexes of non-missing observations
+    gen muestra=e(sample)
+    ereturn clear
 
-*dropping missing values from G matrix (eliminating the rows and columns with missing values, so the matrix are comformable)
-mata G1=select(`adjacency',muestra)
-mata G1=select(G1,muestra')
+    *moving data as matrices
+    mata X=st_data(.,"`varlist'")
+    mata vardir=st_data(.,"`vardir'")
+    mata y=st_data(.,"`dep'")
+    mata muestra=st_data(.,"muestra")
 
-*row normalizing G if needed
-if "`row'"!="" mata G1=G1:/editvalue(rowsum(G1),0,1)
+    *dropping missing values from data matrices
+    mata X=select(X,muestra)
+    mata vardir=select(vardir,muestra)
+    mata y=select(y,muestra)
 
-*generating identity matrix
-mata Id=I(rows(G1))
+    *dropping missing values from G matrix (eliminating the rows and columns with missing values, so the matrix are comformable)
+    mata G1=select(`adjacency',muestra)
+    mata G1=select(G1,muestra')
 
-*OLS results
-if "`ols'"!="" {
-	mata X_1 =  J(rows(X),1,1), G1*y, X, G1*X 
-	mata theta= invsym(quadcross(X_1, X_1))*quadcross(X_1, y)
-	mata e= y - X_1*theta
-	mata V = (quadsum(e:^2)/(rows(X_1)-cols(X_1)))*invsym(quadcross(X_1, X_1))
-}
-else {
-	*putting matrices together
-	*with fixed effects
-	if "`fixed'"!="" {
-		mata S=( (Id-G1)*X, (Id-G1)*G1*X, (Id-G1)*G1*G1*X )
-		mata X_1= ( (Id-G1)*G1*y, (Id-G1)*X, (Id-G1)*G1*X )				
-	}
-	else{
-		mata S=( J(rows(X),1,1), X, G1*X, G1*G1*X )
-		mata X_1= ( J(rows(X),1,1), G1*y, X, G1*X )
-	}
-	mata P= S*invsym(quadcross(S,S))*S'
+    *row normalizing G if needed
+    if "`row'"!="" mata G1=G1:/editvalue(rowsum(G1),0,1)
 
-	*first 2sls
-	if "`fixed'"!="" mata theta_1= invsym(X_1'*P*X_1)*X_1'*P*(Id-G1)*y
+    *generating identity matrix
+    mata Id=I(rows(G1))
+
+    *OLS results
+    if "`ols'"!="" {
+    mata X_1 =  J(rows(X),1,1), G1*y, X, G1*X, vardir
+    mata theta= invsym(quadcross(X_1, X_1))*quadcross(X_1, y)
+    mata e= y - X_1*theta
+    mata V = (quadsum(e:^2)/(rows(X_1)-cols(X_1)))*invsym(quadcross(X_1, X_1))
+    }
+    else {
+    *putting matrices together
+    *with fixed effects
+    if "`fixed'"!="" {
+    mata S=( (Id-G1)*X, (Id-G1)*G1*X, (Id-G1)*G1*G1*X )
+    mata X_1= ( (Id-G1)*G1*y, (Id-G1)*X, (Id-G1)*G1*X )             
+    }
+    else{
+    mata S=( J(rows(X),1,1), X, G1*X, G1*G1*X )
+    mata X_1= ( J(rows(X),1,1), G1*y, X, G1*X )
+    }
+    mata P= S*invsym(quadcross(S,S))*S'
+
+    *first 2sls
+    if "`fixed'"!="" mata theta_1= invsym(X_1'*P*X_1)*X_1'*P*(Id-G1)*y
     else mata theta_1= invsym(X_1'*P*X_1)*X_1'*P*y
-	
-	*building instrument
-	if "`fixed'"!="" {
-		mata Z = G1*luinv(Id-theta_1[1]*G1)*(Id-G1)*(X*theta_1[2::(1+cols(X))] +  G1*X*theta_1[(2+cols(X))::(1+2*cols(X))] ), (Id-G1)*X, (Id-G1)*G1*X	
-	}
-	else{
-		mata Z = J(rows(X),1,1), G1*luinv(Id-theta_1[2]*G1)*( theta_1[1]*J(rows(X),1,1) + X*theta_1[3::(2+cols(X))] +  G1*X*theta_1[(3+cols(X))::(2+2*cols(X))] ), X, G1*X
-	}
-	*
-	
+
+    *building instrument
+    if "`fixed'"!="" {
+    mata Z = G1*luinv(Id-theta_1[1]*G1)*(Id-G1)*(X*theta_1[2::(1+cols(X))] +  G1*X*theta_1[(2+cols(X))::(1+2*cols(X))] ), (Id-G1)*X, (Id-G1)*G1*X   
+    }
+    else{
+    mata Z = J(rows(X),1,1), G1*luinv(Id-theta_1[2]*G1)*( theta_1[1]*J(rows(X),1,1) + X*theta_1[3::(2+cols(X))] +  G1*X*theta_1[(3+cols(X))::(2+2*cols(X))] ), X, G1*X
+    }
+    *
+
     *final 2sls
     if "`fixed'"!="" mata theta = luinv(quadcross(Z,X_1))*quadcross(Z,(Id-G1)*y)
     else mata theta = luinv(quadcross(Z,X_1))*quadcross(Z,y)
 
-	*resids
-	if "`fixed'"!="" {
-		mata e= (Id-G1)*y - luinv(Id-theta[1]*G1)*((Id-G1)*X*theta[2::(1+cols(X))] + (Id-G1)*G1*X*theta[(2+cols(X))::(1+2*cols(X))] )
-	}
-	else{
-		mata e= y - luinv(Id-theta[2]*G1)*( theta[1]*J(rows(X),1,1) + X*theta[3::(2+cols(X))] +  G1*X*theta[(3+cols(X))::(2+2*cols(X))] )
-	}
+    *resids
+    if "`fixed'"!="" {
+    mata e= (Id-G1)*y - luinv(Id-theta[1]*G1)*((Id-G1)*X*theta[2::(1+cols(X))] + (Id-G1)*G1*X*theta[(2+cols(X))::(1+2*cols(X))] )
+    }
+    else{
+    mata e= y - luinv(Id-theta[2]*G1)*( theta[1]*J(rows(X),1,1) + X*theta[3::(2+cols(X))] +  G1*X*theta[(3+cols(X))::(2+2*cols(X))] )
+    }
 
 
-	*variance
-	mata V = luinv(quadcross(Z,X_1))*(Z')*diag(e:^2)*Z*luinv(quadcross(X_1,Z))
-}
+    *variance
+    mata V = luinv(quadcross(Z,X_1))*(Z')*diag(e:^2)*Z*luinv(quadcross(X_1,Z))
+    }
 
-*sending results to Stata
-mata st_matrix("b",theta')
-mata st_matrix("V",V)
+    *sending results to Stata
+    mata st_matrix("b",theta')
+    mata st_matrix("V",V)
 
-*row and col names for matrices
-local exog_peer //list for names of exogenous effects
-foreach var in `varlist'{
-	local exog_peer `exog_peer' `var'_p
-}
-if "`fixed'"!="" {
-	local varnames `dep'_p `varlist' `exog_peer'
-}
-else{
-	local varnames _cons `dep'_p `varlist' `exog_peer'
-}
+    *row and col names for matrices
+    local exog_peer //list for names of exogenous effects
+    foreach var in `varlist'{
+    local exog_peer `exog_peer' `var'_p
+    }
+    if "`fixed'"!="" {
+    local varnames `dep'_p `varlist' `exog_peer' `vardir'
+    }
+    else{
+    local varnames _cons `dep'_p `varlist' `exog_peer' `vardir'
+    }
 
 
-*adding col and rownames
-matrix colnames b= `varnames'
-matrix colnames V = `varnames'
-matrix rownames V = `varnames'
-}
-*storing eclass results
-ereturn post b V, depname(`dep') esample(muestra)
-mata st_numscalar("e(N)", rows(G1))
-mata st_numscalar("e(df_r)", rows(X_1)-cols(X_1))
-eret local cmd peer_iv
-ereturn display
+    *adding col and rownames
+    matrix colnames b= `varnames'
+    matrix colnames V = `varnames'
+    matrix rownames V = `varnames'
+    }
+    *storing eclass results
+    *tab muestra
+    ereturn post b V, depname(`dep') esample(muestra)
+    mata st_numscalar("e(N)", rows(G1))
+    mata st_numscalar("e(df_r)", rows(X_1)-cols(X_1))
+    eret local cmd peer_iv
+    ereturn display
 
-restore		
+    restore     
 end
 
 ```
