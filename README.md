@@ -114,7 +114,8 @@ program define peer_iv, eclass
 
     *OLS results
     if "`ols'"!="" {
-    mata X_1 =  J(rows(X),1,1), G1*y, X, G1*X, vardir
+    if "`vardir'"!="" mata X_1 =  J(rows(X),1,1), G1*y, X, G1*X, vardir
+    else mata X_1 =  J(rows(X),1,1), G1*y, X, G1*X
     mata theta= invsym(quadcross(X_1, X_1))*quadcross(X_1, y)
     mata e= y - X_1*theta
     mata V = (quadsum(e:^2)/(rows(X_1)-cols(X_1)))*invsym(quadcross(X_1, X_1))
