@@ -93,14 +93,14 @@ program define peer_iv, eclass
 
     *moving data as matrices
     mata X=st_data(.,"`varlist'")
-    mata vardir=st_data(.,"`vardir'")
     mata y=st_data(.,"`dep'")
     mata muestra=st_data(.,"muestra")
-
+    if "`vardir'"!="" mata vardir=st_data(.,"`vardir'")
+    
     *dropping missing values from data matrices
     mata X=select(X,muestra)
-    mata vardir=select(vardir,muestra)
     mata y=select(y,muestra)
+    if "`vardir'"!="" mata vardir=select(vardir,muestra)
 
     *dropping missing values from G matrix (eliminating the rows and columns with missing values, so the matrix are comformable)
     mata G1=select(`adjacency',muestra)
